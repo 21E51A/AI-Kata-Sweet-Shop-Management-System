@@ -1,28 +1,31 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { UsersService } from '../users/users.service';
-import { JwtService } from '@nestjs/jwt';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AuthService {
-  constructor(
-    private usersService: UsersService,
-    private jwtService: JwtService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async register(email: string, password: string) {
-    const hashed = await bcrypt.hash(password, 10);
-    return this.usersService.createUser(email, hashed);
-  }
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+    });
 
-  async login(email: string, password: string) {
-    const user = await this.usersService.findByEmail(email);
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (existingUser) {
+      throw new BadRequestException('Email already registered');
+    }
 
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const payload = { sub: user.id, email: user.email, role: user.role };
-    return { access_token: this.jwtService.sign(payload) };
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        password: hashedPassword,
+        role: 'USER',
+      },
+    });
+
+    const { password: _, ...safeUser } = user;
+    return safeUser;
   }
 }
